@@ -135,6 +135,13 @@ procedure AppliquerThemeBouton(ABtn: TButton; Style: TBtnStyle);
 procedure StyleModernButton(ABtn: TButton; Style: TBtnStyle;
   const AIcon, ACaption: string);
 procedure AppliquerThemeTousLesComposants(AForm: TForm);
+function UIScale(AControl: TControl; Value: Integer): Integer;
+function CreateWorkspace(AForm: TForm): TScrollBox;
+procedure PlaceControl(AControl: TControl; X, Y, W, H: Integer);
+procedure PlaceField(ALabel: TLabel; AField: TWinControl;
+  X, Y, W, TabIndex: Integer);
+function LayoutActions(AParent: TWinControl; const Buttons: array of TButton;
+  AWidth: Integer): Integer;
 
 function ContrastRatio(C1, C2: TColor): Double;
 function IsContrastAccessible(C1, C2: TColor; AMinRatio: Double): Boolean;
@@ -507,6 +514,89 @@ begin
   Panel.BevelInner := bvNone;
   Panel.Anchors := AAnchors;
   Panel.SendToBack;
+end;
+
+function UIScale(AControl: TControl; Value: Integer): Integer;
+var
+  Form: TCustomForm;
+begin
+  Form := GetParentForm(AControl);
+  if AControl is TCustomForm then Form := TCustomForm(AControl);
+  if Assigned(Form) then
+    Result := MulDiv(Value, Form.CurrentPPI, 96)
+  else
+    Result := MulDiv(Value, Screen.PixelsPerInch, 96);
+end;
+
+function CreateWorkspace(AForm: TForm): TScrollBox;
+var
+  I: Integer;
+begin
+  Result := TScrollBox.Create(AForm);
+  Result.BorderStyle := bsNone;
+  Result.ParentBiDiMode := False;
+  // Positions are explicitly RTL; do not let Windows mirror them a second time.
+  Result.BiDiMode := bdRightToLeftReadingOnly;
+  for I := AForm.ControlCount - 1 downto 0 do
+  begin
+    AForm.Controls[I].Align := alNone;
+    AForm.Controls[I].Parent := Result;
+  end;
+  AForm.AutoScroll := False;
+  Result.Parent := AForm;
+  Result.Align := alClient;
+  Result.VertScrollBar.Tracking := True;
+  Result.HorzScrollBar.Tracking := True;
+end;
+
+procedure PlaceControl(AControl: TControl; X, Y, W, H: Integer);
+begin
+  AControl.Align := alNone;
+  AControl.Anchors := [akLeft, akTop];
+  if AControl is TLabel then
+  begin
+    TLabel(AControl).AutoSize := False;
+    TLabel(AControl).Alignment := taRightJustify;
+    TLabel(AControl).Layout := tlCenter;
+    TLabel(AControl).EllipsisPosition := epEndEllipsis;
+    TLabel(AControl).ShowHint := True;
+    TLabel(AControl).Hint := TLabel(AControl).Caption;
+  end;
+  AControl.SetBounds(X, Y, Max(1, W), Max(1, H));
+end;
+
+procedure PlaceField(ALabel: TLabel; AField: TWinControl;
+  X, Y, W, TabIndex: Integer);
+begin
+  PlaceControl(ALabel, X, Y, W, UIScale(AField, 24));
+  ALabel.FocusControl := AField;
+  PlaceControl(AField, X, Y + UIScale(AField, 26), W, UIScale(AField, 36));
+  AField.TabOrder := TabIndex;
+end;
+
+function LayoutActions(AParent: TWinControl; const Buttons: array of TButton;
+  AWidth: Integer): Integer;
+var
+  I, X, Y, W, Gap, H: Integer;
+begin
+  Gap := UIScale(AParent, 12);
+  H := UIScale(AParent, 40);
+  X := AWidth - Gap;
+  Y := Gap;
+  for I := Low(Buttons) to High(Buttons) do
+  begin
+    W := Min(UIScale(AParent, 144), AWidth - 2 * Gap);
+    if X - W < Gap then
+    begin
+      X := AWidth - Gap;
+      Inc(Y, H + Gap);
+    end;
+    Buttons[I].Parent := AParent;
+    PlaceControl(Buttons[I], X - W, Y, W, H);
+    Buttons[I].TabOrder := I;
+    Dec(X, W + Gap);
+  end;
+  Result := Y + H + Gap;
 end;
 
 { -- VCL Native Theming -- }

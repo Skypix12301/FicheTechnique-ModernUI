@@ -48,6 +48,10 @@ type
     FFicheID: Integer;
     FIsNew: Boolean;
     FModified: Boolean;
+    FLoading: Boolean;
+    FSaving: Boolean;
+    FWorkspace: TScrollBox;
+    FRecapScroll: TScrollBox;
     FMontantHT: Currency;
     FMontantTVA: Currency;
     FMontantTTC: Currency;
@@ -55,6 +59,9 @@ type
     FRecapNames: TArray<string>;
     FRecapTotals: TArray<Currency>;
     FTVARate: Double;
+    procedure FieldChanged(Sender: TObject);
+    procedure EditorCloseQuery(Sender: TObject; var CanClose: Boolean);
+    procedure ThemeChanged;
     procedure RecapBoxPaint(Sender: TObject);
     procedure StylerFormulaire;
     procedure ChargerProjets;
@@ -74,6 +81,9 @@ type
       DataCol: Integer; Column: TColumn; State: TGridDrawState);
     procedure ApplyModernLayout;
   public
+    destructor Destroy; override;
+    function ConfirmLeave: Boolean;
+    function SaveFiche: Boolean;
     procedure NouveauMode;
     procedure ChargerFiche(AFicheID: Integer);
   end;
@@ -85,7 +95,7 @@ implementation
 
 {$R *.dfm}
 
-uses uDataModule_v3, uModernTheme, uUtils_v3, uGraphicsGDIP,
+uses uDataModule_v3, uModernTheme, uUtils_v3, uGraphicsGDIP, uMain_v3, System.Math,
   Winapi.GDIPAPI, Winapi.GDIPOBJ;
 
 procedure TfrmFicheTechnique.FormCreate(Sender: TObject);
@@ -102,6 +112,19 @@ begin
   FMontantTVA := 0;
   FMontantTTC := 0;
 
+  FLoading := True;
+  FWorkspace := CreateWorkspace(Self);
+  OnResize := FormResize;
+  OnKeyDown := FormKeyDown;
+  OnCloseQuery := EditorCloseQuery;
+  memoOperation.OnChange := FieldChanged;
+  edtTVA.OnChange := FieldChanged;
+  cboProjet.OnChange := cboProjetChange;
+  dtpDate.Enabled := False;
+  dtpDate.ShowHint := True;
+  dtpDate.Hint := 'تاريخ الإنشاء يحدده النظام';
+  dtpDate.ParentBiDiMode := False;
+  dtpDate.BiDiMode := bdLeftToRight;
   PageControlLots.OnChanging := OnPageControlChanging;
   StylerFormulaire;
   ChargerProjets;
@@ -111,24 +134,52 @@ begin
 
   gridRecap.FixedRows := 0;
   gridRecap.FixedCols := 0;
+  FLoading := False;
+  FModified := False;
+  RegisterThemeObserver(ThemeChanged);
+  ApplyModernLayout;
+end;
+
+destructor TfrmFicheTechnique.Destroy;
+begin
+  UnregisterThemeObserver(ThemeChanged);
+  inherited;
+end;
+
+procedure TfrmFicheTechnique.ThemeChanged;
+begin
+  AppliquerThemeTousLesComposants(Self);
+  StylerFormulaire;
+  ApplyModernLayout;
+  Invalidate;
+end;
+
+procedure TfrmFicheTechnique.FieldChanged(Sender: TObject);
+begin
+  if not FLoading then FModified := True;
+end;
+
+function TfrmFicheTechnique.ConfirmLeave: Boolean;
+begin
+  Result := not FSaving;
+  if not Result or not FModified then Exit;
+  case Confirmer3('هل تريد حفظ تغييرات بيانات البطاقة؟' + sLineBreak +
+    'تعديلات الحصص والسطور تُحفظ مباشرة ولا يلغيها الخروج.') of
+    mrYes: Result := SaveFiche;
+    mrNo: Result := True;
+  else
+    Result := False;
+  end;
+end;
+
+procedure TfrmFicheTechnique.EditorCloseQuery(Sender: TObject; var CanClose: Boolean);
+begin
+  CanClose := ConfirmLeave;
 end;
 
 procedure TfrmFicheTechnique.FormClose(Sender: TObject; var Action: TCloseAction);
 begin
-  if FModified then
-  begin
-    case Confirmer3(#1607#1604' '#1578#1585#1610#1583' '#1581#1601#1592' '#1575#1604#1578#1594#1610#1610#1585#1575#1578' ?') of
-      mrYes:
-      begin
-        btnSaveClick(nil);
-        Action := caFree;
-      end;
-      mrNo: Action := caFree;
-      mrCancel: Action := caNone;
-    end;
-  end
-  else
-    Action := caFree;
+  Action := caHide;
 end;
 
 procedure TfrmFicheTechnique.FormKeyDown(Sender: TObject; var Key: Word;
@@ -219,12 +270,25 @@ begin
   lblMontantLettres.AlignWithMargins := True;
   lblMontantLettres.Height := 40;
 
-  FRecapBox := TPaintBox.Create(Self);
-  FRecapBox.Parent := pnlRecap;
-  FRecapBox.Align := alClient;
-  FRecapBox.AlignWithMargins := True;
-  FRecapBox.BiDiMode := bdLeftToRight;
-  FRecapBox.OnPaint := RecapBoxPaint;
+  if FRecapBox = nil then
+  begin
+    FRecapScroll := TScrollBox.Create(Self);
+    FRecapScroll.Parent := pnlRecap;
+    FRecapScroll.BorderStyle := bsNone;
+    FRecapScroll.BiDiMode := bdLeftToRight;
+    FRecapScroll.VertScrollBar.Tracking := True;
+    FRecapBox := TPaintBox.Create(Self);
+    FRecapBox.Parent := FRecapScroll;
+    FRecapBox.OnPaint := RecapBoxPaint;
+  end;
+  FRecapScroll.Color := CLR_BG_SECONDARY;
+  edtNumFiche.ParentBiDiMode := False;
+  edtNumFiche.BiDiMode := bdLeftToRight;
+  edtNumFiche.TabStop := False;
+  edtStatut.TabStop := False;
+  btnPrint.Enabled := False;
+  btnPrint.ShowHint := True;
+  btnPrint.Hint := 'الطباعة غير متاحة في هذا الإصدار';
 end;
 
 procedure TfrmFicheTechnique.ChargerProjets;
@@ -265,8 +329,10 @@ var
   qry: TFDQuery;
   I: Integer;
 begin
+  FLoading := True;
   FFicheID := AFicheID;
   FIsNew := False;
+  cboProjet.Enabled := False;
 
   qry := TFDQuery.Create(nil);
   try
@@ -303,9 +369,13 @@ begin
 
       ChargerLots;
       MettreAJourRecapitulatif;
-    end;
+    end
+    else
+      raise Exception.Create('البطاقة غير موجودة أو حُذفت');
+    FModified := False;
   finally
     qry.Free;
+    FLoading := False;
   end;
 end;
 
@@ -804,7 +874,8 @@ end;
 
 procedure TfrmFicheTechnique.cboProjetChange(Sender: TObject);
 begin
-  FModified := True;
+  if FLoading then Exit;
+  FieldChanged(Sender);
   if FIsNew and (cboProjet.ItemIndex >= 0) then
   begin
     try
@@ -940,51 +1011,69 @@ begin
 end;
 
 procedure TfrmFicheTechnique.btnSaveClick(Sender: TObject);
+begin
+  SaveFiche;
+end;
+
+function TfrmFicheTechnique.SaveFiche: Boolean;
 var
   ProjetID: Integer;
   TauxTVA: Double;
 begin
-  if not ValiderChampCombo(cboProjet, #1575#1604#1605#1588#1585#1608#1593) then Exit;
-
+  Result := False;
+  if FSaving then Exit;
+  if not ValiderChampCombo(cboProjet, 'المشروع') then Exit;
   if Trim(memoOperation.Text) = '' then
   begin
-    ShowAvertissement(#1575#1604#1585#1580#1575#1569' '#1573#1583#1582#1575#1604' '#1575#1604#1593#1605#1604#1610#1577);
-    memoOperation.SetFocus;
+    ShowAvertissement('الرجاء إدخال العملية');
+    if memoOperation.CanFocus then memoOperation.SetFocus;
     Exit;
   end;
-
+  if not TryParseDecimal(edtTVA.Text, TauxTVA) or
+    (TauxTVA < 0) or (TauxTVA > 100) then
+  begin
+    ShowAvertissement('أدخل نسبة رسم صحيحة بين 0 و100');
+    if edtTVA.CanFocus then edtTVA.SetFocus;
+    Exit;
+  end;
   ProjetID := Integer(cboProjet.Items.Objects[cboProjet.ItemIndex]);
-  TauxTVA := StrToFloatDef(edtTVA.Text, 9.0);
-
-  ShowLoadingOverlay(#1581#1601#1592'...');
+  FSaving := True;
+  btnSave.Enabled := False;
+  btnValidate.Enabled := False;
   try
+    ShowLoadingOverlay('جارٍ الحفظ...');
     try
       if FIsNew then
       begin
-        FFicheID := dmMain.CreerFicheVide(ProjetID, edtNumFiche.Text,
-          memoOperation.Text);
-        if FFicheID > 0 then
-        begin
-          FIsNew := False;
-          FModified := False;
+        if Trim(edtNumFiche.Text) = '' then
           edtNumFiche.Text := dmMain.GenererNumeroFiche(ProjetID);
-          Caption := #1576#1591#1575#1602#1577' '#1578#1602#1606#1610#1577 + ' - ' + edtNumFiche.Text;
-          ShowSucces(#1578#1605' '#1573#1606#1588#1575#1569' '#1575#1604#1576#1591#1575#1602#1577' '#1576#1606#1580#1575#1581 + ' !');
-        end;
-      end
-      else
-      begin
-        dmMain.ModifierFiche(FFicheID, memoOperation.Text, TauxTVA);
-        FModified := False;
-        ShowSucces(#1578#1605' '#1575#1604#1581#1601#1592' '#1576#1606#1580#1575#1581 + ' !');
+        FFicheID := dmMain.CreerFicheVide(ProjetID, edtNumFiche.Text, memoOperation.Text);
+        if FFicheID <= 0 then raise Exception.Create('تعذر إنشاء البطاقة');
+        // The ID already exists: retries must update it, never insert a duplicate.
+        FIsNew := False;
+        cboProjet.Enabled := False;
+        Caption := 'بطاقة تقنية - ' + edtNumFiche.Text;
       end;
-    except
-      on E: Exception do
-        ShowErreur(#1582#1591#1571' '#1601#1610' '#1575#1604#1573#1590#1575#1601#1577 + ': ' + E.Message);
+      dmMain.ModifierFiche(FFicheID, memoOperation.Text, TauxTVA);
+      FModified := False;
+      Result := True;
+      if PageControlLots.PageCount = 0 then ChargerLots;
+      MettreAJourRecapitulatif;
+    finally
+      HideLoadingOverlay;
     end;
-  finally
-    HideLoadingOverlay;
+    ShowSucces('تم حفظ البطاقة بنجاح');
+  except
+    on E: Exception do
+    begin
+      Result := False;
+      FModified := True;
+      ShowErreur('تعذر إكمال الحفظ: ' + E.Message);
+    end;
   end;
+  FSaving := False;
+  btnSave.Enabled := True;
+  btnValidate.Enabled := FFicheID > 0;
 end;
 
 procedure TfrmFicheTechnique.btnValidateClick(Sender: TObject);
@@ -1020,7 +1109,10 @@ end;
 
 procedure TfrmFicheTechnique.btnCloseClick(Sender: TObject);
 begin
-  Close;
+  if (Parent <> nil) and (Owner is TfrmMain) then
+    TfrmMain(Owner).RequestCloseEditor
+  else
+    Close;
 end;
 
 procedure TfrmFicheTechnique.FormResize(Sender: TObject);

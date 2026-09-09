@@ -36,6 +36,8 @@ type
     procedure ConfigurerGrille;
     procedure StylerFormulaire;
     procedure ApplyModernLayout;
+  public
+    procedure RefreshData;
   end;
 
 var
@@ -131,7 +133,11 @@ begin
   end;
   try
     qryCatalogue.Open;
+    if qryCatalogue.IsEmpty then
+      ShowAvertissement('لا توجد نتائج مطابقة للبحث')
   except
+    on E: Exception do
+      ShowErreur('خطأ في تحميل الكتالوج: ' + E.Message);
   end;
 end;
 
@@ -213,6 +219,11 @@ end;
 procedure TfrmCatalogue.SearchTimerTick(Sender: TObject);
 begin
   FSearchTimer.Enabled := False;
+  ChargerCatalogue;
+end;
+
+procedure TfrmCatalogue.RefreshData;
+begin
   ChargerCatalogue;
 end;
 
