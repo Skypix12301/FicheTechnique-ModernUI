@@ -39,7 +39,7 @@ procedure HideLoadingOverlay;
 implementation
 
 uses
-  uModernTheme, uGraphicsGDIP, uIconsSVG, Winapi.GDIPAPI, Winapi.GDIPOBJ;
+  uModernTheme, uGraphicsGDIP, uIconsSVG, Winapi.GDIPAPI, Winapi.GDIPOBJ, System.Math;
 
 type
   TModernDlgKind = (mdSuccess, mdError, mdWarning, mdConfirm);
@@ -430,6 +430,23 @@ begin
   Result := FormatFloat('#,##0.00', Value);
 end;
 
+function TryParseDecimal(const Text: string; out Value: Double): Boolean;
+var
+  Normalized: string;
+  C: Char;
+  Settings: TFormatSettings;
+begin
+  Normalized := Trim(Text);
+  for C := #$0660 to #$0669 do
+    Normalized := StringReplace(Normalized, C, Char(Ord('0') + Ord(C) - $0660), [rfReplaceAll]);
+  Normalized := StringReplace(Normalized, #$066B, '.', [rfReplaceAll]);
+  Normalized := StringReplace(Normalized, ',', '.', [rfReplaceAll]);
+  Settings := TFormatSettings.Create;
+  Settings.DecimalSeparator := '.';
+  Result := TryStrToFloat(Normalized, Value, Settings);
+  if Result then Result := not IsNan(Value) and not IsInfinite(Value);
+end;
+
 function ValiderChampObligatoire(AEdit: TEdit; const NomChamp: string): Boolean;
 begin
   Result := True;
@@ -481,7 +498,7 @@ begin
     ShowLoadingOverlay(Msg)
   else
     Screen.Cursor := crHourGlass;
-  Application.ProcessMessages;
+  if Assigned(Screen.ActiveForm) then Screen.ActiveForm.Update;
 end;
 
 procedure ArreterChargement;
@@ -549,6 +566,7 @@ procedure ShowLoadingOverlay(const AMsg: string);
 begin
   if Assigned(FLoadingOverlay) then Exit;
   FLoadingOverlay := TLoadingOverlay.CreateNew(nil);
+  FLoadingOverlay.FormCreate(FLoadingOverlay);
   FLoadingOverlay.FMsgLabel.Caption := AMsg;
   FLoadingOverlay.Show;
   FLoadingOverlay.Update;

@@ -43,13 +43,11 @@ type
     FFormCache: TDictionary<TFormClass, TForm>;
     FActiveNav: TAdvSmoothButton;
     FNavHistory: TStack<TFormClass>;
-    FFadeTimer: TTimer;
-    FFadeInA: Integer;
-    FFadeOutA: Integer;
-    FFadingIn: Boolean;
-    FFadingOut: Boolean;
-    FClosingForm: TForm;
-    FClosingCached: Boolean;
+    FNavigating: Boolean;
+    FGoingBack: Boolean;
+    procedure MainCloseQuery(Sender: TObject; var CanClose: Boolean);
+    procedure CloseEditorMessage(var Message: TMessage); message WM_APP + 42;
+    function CanLeaveCurrent: Boolean;
     FBrandIcon: TPanel;
     FBrandGlyph: TLabel;
     FSecAdmin: TLabel;
@@ -68,9 +66,9 @@ type
     procedure StatusBarSetup;
     procedure ApplyModernLayout;
     procedure NavigateBack;
-    procedure FadeTimerTimer(Sender: TObject);
   public
     procedure ApresConnexion;
+    procedure RequestCloseEditor;
   end;
 
 var
@@ -90,12 +88,8 @@ procedure TfrmMain.FormCreate(Sender: TObject);
 begin
   FCurrentForm := nil;
   FCurrentCached := False;
-  FFadeInA := 0;
-  FFadeOutA := 255;
-  FFadingIn := False;
-  FFadingOut := False;
-  FClosingForm := nil;
-  FClosingCached := False;
+  FNavigating := False;
+  FGoingBack := False;
   FBrandIcon := nil;
   FBrandGlyph := nil;
   FSecAdmin := nil;
@@ -103,10 +97,7 @@ begin
   FFormCache := TDictionary<TFormClass, TForm>.Create;
   FNavHistory := TStack<TFormClass>.Create;
 
-  FFadeTimer := TTimer.Create(Self);
-  FFadeTimer.Interval := 16;
-  FFadeTimer.OnTimer := FadeTimerTimer;
-  FFadeTimer.Enabled := False;
+  OnCloseQuery := MainCloseQuery;
 
   CollectNavItems;
   ApplyAllStyles;
@@ -128,19 +119,9 @@ procedure TfrmMain.FormClose(Sender: TObject; var Action: TCloseAction);
 begin
   TimerDate.Enabled := False;
   UnregisterThemeObserver(ApplyAllStyles);
-  FFadeTimer.Enabled := False;
-  if Assigned(FCurrentForm) then
-  begin
-    if not FCurrentCached then
-      FreeAndNil(FCurrentForm)
-    else
-      FCurrentForm.Visible := False;
-    FCurrentForm := nil;
-  end;
-  FCurrentCached := False;
+  CloseCurrentChild;
   FreeAndNil(FFormCache);
   FreeAndNil(FNavHistory);
-  FreeAndNil(FFadeTimer);
   Action := caFree;
 end;
 
@@ -298,9 +279,6 @@ begin
   if not (Sender is TAdvSmoothButton) then Exit;
   Item := TAdvSmoothButton(Sender);
 
-  if Item.Tag <> 99 then
-    SetActiveNav(Item);
-
   case Item.Tag of
     1: NavigateTo(#1604#1608#1581#1577' '#1575#1604#1602#1610#1575#1583#1577, TfrmDashboard);
     2: NavigateTo(#1602#1575#1574#1605#1577' '#1575#1604#1576#1591#1575#1602#1575#1578, TfrmListeFiches);
@@ -315,7 +293,7 @@ end;
 procedure TfrmMain.FormKeyDown(Sender: TObject; var Key: Word;
   Shift: TShiftState);
 begin
-  if (ssCtrl in Shift) then
+  if Shift = [ssCtrl] then
   begin
     case Key of
       Ord('1'): NavigateTo(#1604#1608#1581#1577' '#1575#1604#1602#1610#1575#1583#1577, TfrmDashboard);
@@ -325,21 +303,29 @@ begin
       Ord('5'): NavigateTo(#1603#1578#1575#1604#1608#1582' '#1575#1604#1605#1608#1575#1583, TfrmCatalogue);
       Ord('6'): NavigateTo(#1575#1604#1573#1593#1583#1575#1583#1575#1578, TfrmParametres);
       Ord('Q'): Close;
+      Ord('S'):
+        if FCurrentForm is TfrmFicheTechnique then
+          TfrmFicheTechnique(FCurrentForm).btnSaveClick(nil)
+        else Exit;
+    else
+      Exit;
     end;
     Key := 0;
   end
   else if Key = VK_F5 then
   begin
-    if Assigned(FCurrentForm) and (FCurrentForm is TfrmDashboard) then
-      TfrmDashboard(FCurrentForm).btnRefreshClick(nil);
+    if FCurrentForm is TfrmDashboard then
+      TfrmDashboard(FCurrentForm).btnRefreshClick(nil)
+    else if FCurrentForm is TfrmListeFiches then
+      TfrmListeFiches(FCurrentForm).RefreshData
+    else if FCurrentForm is TfrmCatalogue then
+      TfrmCatalogue(FCurrentForm).RefreshData
+    else Exit;
     Key := 0;
   end
-  else if Key = VK_Escape then
+  else if (Key = VK_Escape) and (Shift = []) then
   begin
-    if Assigned(FCurrentForm) and (FCurrentForm is TfrmFicheTechnique) then
-      TfrmFicheTechnique(FCurrentForm).Close
-    else
-      CloseCurrentChild;
+    NavigateBack;
     Key := 0;
   end
   else if (ssAlt in Shift) and (Key = VK_Left) then
@@ -352,119 +338,118 @@ end;
 procedure TfrmMain.NavigateTo(const Titre: string; FormClass: TFormClass;
   Cacheable: Boolean);
 var
-  Frm: TForm;
+  Frm, Previous: TForm;
+  WasCached, IsNewForm: Boolean;
+  Nav: TAdvSmoothButton;
 begin
-  if Assigned(FCurrentForm) then
-    FNavHistory.Push(TFormClass(FCurrentForm.ClassType));
-
-  CloseCurrentChild;
-
-  if Cacheable and FFormCache.TryGetValue(FormClass, Frm) then
-  begin
-    ShowChildInContent(Frm);
-    FCurrentCached := True;
-  end
-  else
-  begin
-    Screen.Cursor := crHourGlass;
+  if FNavigating then Exit;
+  if Assigned(FCurrentForm) and (FCurrentForm.ClassType = FormClass) then Exit;
+  FNavigating := True;
+  Screen.Cursor := crHourGlass;
+  try
+    if not CanLeaveCurrent then Exit;
+    Cacheable := FormClass <> TfrmFicheTechnique;
+    IsNewForm := not (Cacheable and FFormCache.TryGetValue(FormClass, Frm));
+    if IsNewForm then Frm := FormClass.Create(Self);
+    Previous := FCurrentForm;
+    WasCached := FCurrentCached;
     try
-      Frm := FormClass.Create(Self);
-      if Frm.BiDiMode = bdLeftToRight then
-        ConfigurerRTL_v3(Frm);
       ShowChildInContent(Frm);
-      FCurrentCached := Cacheable;
-      if Cacheable then
-        FFormCache.Add(FormClass, Frm);
-    finally
-      Screen.Cursor := crDefault;
+      if not IsNewForm then
+      begin
+        if Frm is TfrmDashboard then TfrmDashboard(Frm).btnRefreshClick(nil);
+        if Frm is TfrmListeFiches then TfrmListeFiches(Frm).RefreshData;
+        if Frm is TfrmCatalogue then TfrmCatalogue(Frm).RefreshData;
+      end;
+      if IsNewForm and Cacheable then FFormCache.Add(FormClass, Frm);
+    except
+      FCurrentForm := Previous;
+      if IsNewForm then Frm.Free else Frm.Hide;
+      if Assigned(Previous) then Previous.Show;
+      raise;
     end;
+    FCurrentCached := Cacheable;
+    if Assigned(Previous) then
+    begin
+      // Editors are transient: history must not recreate an empty, unrelated fiche.
+      if not FGoingBack and WasCached then
+        FNavHistory.Push(TFormClass(Previous.ClassType));
+      if WasCached then Previous.Hide else Previous.Free;
+    end;
+    Nav := nil;
+    if FormClass = TfrmDashboard then Nav := btnNavDashboard
+    else if FormClass = TfrmListeFiches then Nav := btnNavListe
+    else if FormClass = TfrmFicheTechnique then Nav := btnNavAjouter
+    else if FormClass = TfrmProjets then Nav := btnNavProjets
+    else if FormClass = TfrmCatalogue then Nav := btnNavCatalogue
+    else if FormClass = TfrmParametres then Nav := btnNavParametres;
+    SetActiveNav(Nav);
+    if Assigned(Nav) then lblTitle.Caption := Nav.Caption
+    else lblTitle.Caption := Titre;
+  finally
+    Screen.Cursor := crDefault;
+    FNavigating := False;
   end;
-
-  lblTitle.Caption := Titre;
 end;
 
 procedure TfrmMain.NavigateBack;
+var
+  Target: TFormClass;
 begin
-  if FNavHistory.Count > 0 then
-  begin
-    CloseCurrentChild;
-    NavigateTo('', FNavHistory.Pop, True);
+  if FNavigating then Exit;
+  if FNavHistory.Count > 0 then Target := FNavHistory.Peek
+  else Target := TfrmDashboard;
+  FGoingBack := True;
+  try
+    NavigateTo('', Target);
+    if Assigned(FCurrentForm) and (FCurrentForm.ClassType = Target) and
+      (FNavHistory.Count > 0) then FNavHistory.Pop;
+  finally
+    FGoingBack := False;
   end;
 end;
 
 procedure TfrmMain.ShowChildInContent(AForm: TForm);
 begin
+  AForm.Visible := False;
+  AForm.BorderStyle := bsNone;
+  AForm.Parent := pnlContent;
+  AForm.Align := alClient;
+  AForm.AlphaBlend := False;
+  AForm.Show;
+  AForm.BringToFront;
   FCurrentForm := AForm;
-  FCurrentForm.BorderStyle := bsNone;
-  FCurrentForm.Align := alClient;
-  FCurrentForm.Parent := pnlContent;
-  FCurrentForm.Visible := True;
-  FCurrentForm.BringToFront;
-  FCurrentForm.AlphaBlend := True;
-  FCurrentForm.AlphaBlendValue := 0;
-  FFadeInA := 0;
-  FFadingIn := True;
-  FFadeTimer.Enabled := True;
 end;
 
 procedure TfrmMain.CloseCurrentChild;
 begin
-  if (not FFadingOut) and Assigned(FCurrentForm) then
-  begin
-    FClosingForm := FCurrentForm;
-    FClosingCached := FCurrentCached;
-    FCurrentForm := nil;
-    FCurrentCached := False;
-    FFadeOutA := 255;
-    FFadingOut := True;
-    FFadeTimer.Enabled := True;
-  end;
+  if not Assigned(FCurrentForm) then Exit;
+  if FCurrentCached then FCurrentForm.Hide else FCurrentForm.Free;
+  FCurrentForm := nil;
+  FCurrentCached := False;
 end;
 
-procedure TfrmMain.FadeTimerTimer(Sender: TObject);
-const
-  FadeStep = 8;
+function TfrmMain.CanLeaveCurrent: Boolean;
 begin
-  if FFadingOut then
-  begin
-    if Assigned(FClosingForm) then
-    begin
-      Dec(FFadeOutA, FadeStep);
-      if FFadeOutA <= 0 then
-      begin
-        FFadeOutA := 0;
-        FClosingForm.AlphaBlendValue := 0;
-        if not FClosingCached then
-          FClosingForm.Free
-        else
-          FClosingForm.Visible := False;
-        FClosingForm := nil;
-        FFadingOut := False;
-      end
-      else
-        FClosingForm.AlphaBlendValue := FFadeOutA;
-    end
-    else
-      FFadingOut := False;
-  end;
+  Result := True;
+  if FCurrentForm is TfrmFicheTechnique then
+    Result := TfrmFicheTechnique(FCurrentForm).ConfirmLeave;
+end;
 
-  if FFadingIn then
-  begin
-    if Assigned(FCurrentForm) then
-    begin
-      Inc(FFadeInA, FadeStep);
-      if FFadeInA >= 255 then
-      begin
-        FFadeInA := 255;
-        FFadingIn := False;
-      end;
-      FCurrentForm.AlphaBlendValue := FFadeInA;
-    end
-    else
-      FFadingIn := False;
-  end;
+procedure TfrmMain.MainCloseQuery(Sender: TObject; var CanClose: Boolean);
+begin
+  CanClose := not FNavigating;
+  if CanClose then CanClose := CanLeaveCurrent;
+end;
 
-  FFadeTimer.Enabled := FFadingOut or FFadingIn;
+procedure TfrmMain.RequestCloseEditor;
+begin
+  PostMessage(Handle, WM_APP + 42, 0, 0);
+end;
+
+procedure TfrmMain.CloseEditorMessage(var Message: TMessage);
+begin
+  if FCurrentForm is TfrmFicheTechnique then NavigateBack;
 end;
 
 procedure TfrmMain.TimerDateTimer(Sender: TObject);
