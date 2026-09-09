@@ -1,0 +1,39 @@
+# ============================================
+# .gitignore - Delphi / VCL (FichesTechniques v3)
+# ============================================
+
+# --- Fichiers compilés et artifacts Delphi ---
+*.dcu
+*.exe
+*.rsm
+*.map
+*.drc
+*.bpl
+
+# --- État local de l'IDE (machine-spécifique) ---
+*.identcache
+*.dproj.local
+*.local
+FichesTechniques.delphilsp.json
+
+# --- Ressource générée depuis le .dpr (régénérée à la compilation) ---
+FichesTechniques.res
+
+# --- Sauvegardes de l'IDE ---
+*.~*
+__history/
+__recovery/
+
+# --- Logs et fichiers de diagnostic ---
+*.log
+_build.log
+_probe.txt
+
+# --- Fichiers système ---
+$null
+Thumbs.db
+Desktop.ini
+
+# --- Configuration locale (peut contenir des identifiants SQL Server) ---
+# Utiliser config.ini.example comme modèle
+config.ini

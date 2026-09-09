@@ -1,0 +1,23 @@
+; ============================================
+; config.ini.example - Modèle de configuration
+; ============================================
+; Copier ce fichier en "config.ini" à côté de
+; l'exécutable et adapter les valeurs.
+; NE JAMAIS COMMITTER config.ini (contient des identifiants).
+
+[Database]
+Server=localhost
+Database=GestionFichesTechniques
+User=sa
+Password=MotDePasseASaisir
+; WindowsAuth=1 : authentification Windows (identifiants ignorés)
+; WindowsAuth=0 : authentification SQL Server (User/Password utilisés)
+WindowsAuth=1
+
+[Login]
+RememberMe=0
+LastUser=
+
+[UI]
+; ThemeMode : 0 = clair, 1 = sombre
+ThemeMode=0
