@@ -52,9 +52,6 @@ type
     FSaving: Boolean;
     FWorkspace: TScrollBox;
     FRecapScroll: TScrollBox;
-    procedure FieldChanged(Sender: TObject);
-    procedure EditorCloseQuery(Sender: TObject; var CanClose: Boolean);
-    procedure ThemeChanged;
     FMontantHT: Currency;
     FMontantTVA: Currency;
     FMontantTTC: Currency;
@@ -62,6 +59,9 @@ type
     FRecapNames: TArray<string>;
     FRecapTotals: TArray<Currency>;
     FTVARate: Double;
+    procedure FieldChanged(Sender: TObject);
+    procedure EditorCloseQuery(Sender: TObject; var CanClose: Boolean);
+    procedure ThemeChanged;
     procedure RecapBoxPaint(Sender: TObject);
     procedure StylerFormulaire;
     procedure ChargerProjets;

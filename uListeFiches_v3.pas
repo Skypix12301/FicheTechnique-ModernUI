@@ -49,6 +49,8 @@ type
     procedure OuvrirFiche(FicheID: Integer);
     procedure StylerFormulaire;
     procedure ApplyModernLayout;
+  public
+    procedure RefreshData;
   end;
 
 var
@@ -203,14 +205,24 @@ end;
 procedure TfrmListeFiches.ChargerFiches;
 var
   Q: string;
+  HasWhere: Boolean;
 begin
   Q := Trim(edtRecherche.Text);
   qryFiches.Close;
   qryFiches.SQL.Text := 'SELECT * FROM Vue_FichesResume';
+  HasWhere := False;
   if cboFiltreProjet.ItemIndex > 0 then
+  begin
     qryFiches.SQL.Add('WHERE ProjetID = :PID');
+    HasWhere := True;
+  end;
   if Q <> '' then
-    qryFiches.SQL.Add('AND (NumeroFiche LIKE :Q1 OR Operation LIKE :Q2 OR NomProjet LIKE :Q3)');
+  begin
+    if HasWhere then
+      qryFiches.SQL.Add('AND (NumeroFiche LIKE :Q1 OR Operation LIKE :Q2 OR NomProjet LIKE :Q3)')
+    else
+      qryFiches.SQL.Add('WHERE (NumeroFiche LIKE :Q1 OR Operation LIKE :Q2 OR NomProjet LIKE :Q3)');
+  end;
   qryFiches.SQL.Add('ORDER BY DateCreation DESC');
   if cboFiltreProjet.ItemIndex > 0 then
     qryFiches.ParamByName('PID').AsInteger :=
@@ -345,6 +357,11 @@ begin
   ChargerFiches;
 end;
 
+procedure TfrmListeFiches.RefreshData;
+begin
+  ChargerFiches;
+end;
+
 procedure TfrmListeFiches.OuvrirFiche(FicheID: Integer);
 var
   Frm: TfrmFicheTechnique;
@@ -443,7 +460,7 @@ end;
 
 procedure TfrmListeFiches.btnImprimerClick(Sender: TObject);
 begin
-  ShowSucces(#1602#1585#1610#1576#1575);
+  ShowAvertissement('الطباعة غير متوفرة في هذا الإصدار');
 end;
 
 end.

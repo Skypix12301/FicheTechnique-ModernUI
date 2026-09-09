@@ -22,6 +22,7 @@ uses
 
 function ConvertirNombreEnLettresAR(Montant: Currency): string;
 function FormaterMontant(Value: Currency): string;
+function TryParseDecimal(const Text: string; out Value: Double): Boolean;
 
 function ValiderChampObligatoire(AEdit: TEdit; const NomChamp: string): Boolean;
 function ValiderChampCombo(ACmb: TComboBox; const NomChamp: string): Boolean;

@@ -45,13 +45,13 @@ type
     FNavHistory: TStack<TFormClass>;
     FNavigating: Boolean;
     FGoingBack: Boolean;
-    procedure MainCloseQuery(Sender: TObject; var CanClose: Boolean);
-    procedure CloseEditorMessage(var Message: TMessage); message WM_APP + 42;
-    function CanLeaveCurrent: Boolean;
     FBrandIcon: TPanel;
     FBrandGlyph: TLabel;
     FSecAdmin: TLabel;
     btnThemeToggle: TAdvSmoothButton;
+    procedure MainCloseQuery(Sender: TObject; var CanClose: Boolean);
+    procedure CloseEditorMessage(var Message: TMessage); message WM_APP + 42;
+    function CanLeaveCurrent: Boolean;
     procedure CollectNavItems;
     procedure BuildSidebarChrome;
     procedure ThemeToggleClick(Sender: TObject);
